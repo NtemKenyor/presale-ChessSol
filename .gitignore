@@ -1,3 +1,5 @@
 /assets
 assets
 *.env
+chesssol_env
+/chesssol_env
