@@ -1,5 +1,7 @@
-/assets
-assets
+# /assets
+# assets
+/node_packages
+node_package
 *.env
 chesssol_env
 /chesssol_env
