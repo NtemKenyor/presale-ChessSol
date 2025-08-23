@@ -1,37 +1,30 @@
 # ChessSol Presale Backend API v4
-# Flask + SQLite implementation with enhanced CORS and header handling
+# FastAPI + SQLite implementation with enhanced CORS and header handling
 
-from flask import Flask, request, jsonify, make_response, send_file
-from flask_cors import CORS
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Annotated
 import sqlite3
 import json
 import os
 from contextlib import contextmanager
 import logging
 from decimal import Decimal
-import requests
-import io
-import csv
+from contextlib import asynccontextmanager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Flask app initialization
-app = Flask(__name__)
-app.config['JSON_SORT_KEYS'] = False
-
-# Enhanced CORS configuration
-CORS(app, origins="*", supports_credentials=True, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # Database configuration
 DATABASE_FILE = "chesssol_presale.db"
 
 # Constants
 GOAL_AMOUNT_USD = 1000000  # $1M goal
-DEFAULT_SOL_TO_USD_RATE = 150  # Fallback rate
+SOL_TO_USD_RATE = 150  # Should be fetched from API in production
 USDC_TO_USD_RATE = 1
 
 # Database functions
@@ -79,22 +72,121 @@ def init_database():
         
         conn.commit()
 
-def get_solana_price():
-    """Get live Solana price from API with fallback"""
-    try:
-        response = requests.get('https://chesssol.com/api/chesssol/backend/solana-price', timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            return float(data.get('price', DEFAULT_SOL_TO_USD_RATE))
-    except (requests.RequestException, ValueError, KeyError) as e:
-        logger.warning(f"Failed to fetch Solana price: {e}. Using fallback: {DEFAULT_SOL_TO_USD_RATE}")
-    return DEFAULT_SOL_TO_USD_RATE
+# Lifespan event handler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    init_database()
+    logger.info("ChessSol Presale API v4 started successfully")
+    yield
+    # Shutdown
+    logger.info("ChessSol Presale API shutting down")
+
+# FastAPI app initialization with lifespan
+app = FastAPI(
+    title="ChessSol Presale API v4",
+    description="Enhanced Backend API for ChessSol token presale dashboard",
+    version="4.0.0",
+    lifespan=lifespan
+)
+
+# Enhanced CORS middleware to handle all frontend scenarios
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific domains
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"]
+)
+
+# Additional middleware to ensure CORS headers are always present
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+# Handle OPTIONS requests explicitly
+@app.options("/{full_path:path}")
+async def options_handler(request: Request):
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+# Pydantic models for API requests/responses
+class ContributionRequest(BaseModel):
+    wallet: str
+    amount: float
+    currency: str
+    tx_hash: str
+    method: str  # 'crypto' or 'card'
+    network: str = 'mainnet'  # 'mainnet' or 'dev'
+    timestamp: str
+    
+    @field_validator('currency')
+    @classmethod
+    def validate_currency(cls, v):
+        if v not in ['SOL', 'USDC', 'USD']:
+            raise ValueError('Currency must be SOL, USDC, or USD')
+        return v
+    
+    @field_validator('method')
+    @classmethod
+    def validate_method(cls, v):
+        if v not in ['crypto', 'card']:
+            raise ValueError('Method must be crypto or card')
+        return v
+    
+    @field_validator('amount')
+    @classmethod
+    def validate_amount(cls, v, info):
+        currency = info.data.get('currency')
+        if currency == 'SOL' and v < 0.1:
+            raise ValueError('Minimum SOL contribution is 0.1')
+        elif currency == 'USDC' and v < 5.0:
+            raise ValueError('Minimum USDC contribution is 5.0')
+        elif currency == 'USD' and v < 10.0:
+            raise ValueError('Minimum USD contribution is 10.0')
+        return v
+
+class ContributionResponse(BaseModel):
+    id: int
+    wallet: str
+    amount: float
+    currency: str
+    tx_hash: str
+    method: str
+    network: str
+    timestamp: str
+
+class StatsResponse(BaseModel):
+    total_sol: float
+    total_usdc: float
+    total_usd: float
+    total_raised_usd: float
+    contributor_count: int
+    total_contributions: int
+    progress_percentage: float
+
+class ContributorStats(BaseModel):
+    wallet: str
+    amount: float
+    currency: str
+    method: str
+    timestamp: str
 
 def convert_to_usd(amount: float, currency: str) -> float:
     """Convert any currency to USD for calculations"""
     if currency == 'SOL':
-        sol_rate = get_solana_price()
-        return amount * sol_rate
+        return amount * SOL_TO_USD_RATE
     elif currency == 'USDC':
         return amount * USDC_TO_USD_RATE
     elif currency == 'USD':
@@ -102,65 +194,15 @@ def convert_to_usd(amount: float, currency: str) -> float:
     else:
         return 0
 
-def get_network_from_header():
+def get_network_from_header(x_network: Optional[str] = Header(None)) -> str:
     """Extract network from header, default to mainnet"""
-    x_network = request.headers.get('X-Network')
     return x_network if x_network in ['dev', 'mainnet'] else 'mainnet'
 
-# Request validation functions
-def validate_contribution_data(data):
-    """Validate contribution data"""
-    errors = []
-    
-    # Required fields
-    required_fields = ['wallet', 'amount', 'currency', 'tx_hash', 'method', 'timestamp']
-    for field in required_fields:
-        if field not in data:
-            errors.append(f"Missing required field: {field}")
-    
-    if errors:
-        return False, errors
-    
-    # Currency validation
-    if data['currency'] not in ['SOL', 'USDC', 'USD']:
-        errors.append('Currency must be SOL, USDC, or USD')
-    
-    # Method validation
-    if data['method'] not in ['crypto', 'card']:
-        errors.append('Method must be crypto or card')
-    
-    # Amount validation
-    currency = data['currency']
-    amount = float(data['amount'])
-    if currency == 'SOL' and amount < 0.1:
-        errors.append('Minimum SOL contribution is 0.1')
-    elif currency == 'USDC' and amount < 5.0:
-        errors.append('Minimum USDC contribution is 5.0')
-    elif currency == 'USD' and amount < 10.0:
-        errors.append('Minimum USD contribution is 10.0')
-    
-    return len(errors) == 0, errors
-
-# Initialize database on startup
-with app.app_context():
-    init_database()
-    logger.info("ChessSol Presale API v4 started successfully")
-
-# CORS preflight handler
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', '*')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    return response
-
-@app.route('/', methods=['GET', 'OPTIONS'])
-def root():
+# API Routes
+@app.get("/")
+async def root():
     """Health check endpoint"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
-    return jsonify({
+    return {
         "message": "ChessSol Presale API v4 is running",
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -169,88 +211,74 @@ def root():
             "Enhanced CORS support",
             "Real-time contribution tracking",
             "Multi-network support",
-            "Comprehensive error handling",
-            "Live Solana price integration"
+            "Comprehensive error handling"
         ]
-    })
+    }
 
-@app.route('/contribute', methods=['POST', 'OPTIONS'])
-def record_contribution():
+@app.post("/contribute", response_model=dict)
+async def record_contribution(
+    contribution: ContributionRequest,
+    network: str = Depends(get_network_from_header)
+):
     """Record a new contribution"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-        
-        # Validate request data
-        is_valid, errors = validate_contribution_data(data)
-        if not is_valid:
-            return jsonify({"error": "Validation failed", "details": errors}), 400
-        
-        network = get_network_from_header()
         # Override network if provided in request
-        if 'network' in data and data['network']:
-            network = data['network']
+        if contribution.network:
+            network = contribution.network
             
         with get_db_connection() as conn:
             # Check if transaction hash already exists
             existing = conn.execute(
                 "SELECT id FROM contributions WHERE tx_hash = ? AND network = ?",
-                (data['tx_hash'], network)
+                (contribution.tx_hash, network)
             ).fetchone()
             
             if existing:
-                return jsonify({
-                    "error": f"Transaction hash already exists for {network} network"
-                }), 400
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Transaction hash already exists for {network} network"
+                )
             
             # Insert new contribution
             cursor = conn.execute('''
                 INSERT INTO contributions (wallet, amount, currency, tx_hash, method, network, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
-                data['wallet'],
-                float(data['amount']),
-                data['currency'],
-                data['tx_hash'],
-                data['method'],
+                contribution.wallet,
+                contribution.amount,
+                contribution.currency,
+                contribution.tx_hash,
+                contribution.method,
                 network,
-                data['timestamp']
+                contribution.timestamp
             ))
             
             conn.commit()
             contribution_id = cursor.lastrowid
             
-            logger.info(f"New contribution recorded: ID {contribution_id}, {data['amount']} {data['currency']} from {data['wallet'][:10]}... on {network}")
+            logger.info(f"New contribution recorded: ID {contribution_id}, {contribution.amount} {contribution.currency} from {contribution.wallet[:10]}... on {network}")
             
-            return jsonify({
+            return {
                 "success": True,
                 "message": "Contribution recorded successfully",
                 "contribution_id": contribution_id,
                 "network": network,
-                "amount": float(data['amount']),
-                "currency": data['currency'],
-                "usd_value": convert_to_usd(float(data['amount']), data['currency'])
-            })
+                "amount": contribution.amount,
+                "currency": contribution.currency,
+                "usd_value": convert_to_usd(contribution.amount, contribution.currency)
+            }
             
     except sqlite3.IntegrityError as e:
         logger.error(f"Database integrity error: {e}")
-        return jsonify({"error": "Transaction hash already exists"}), 400
+        raise HTTPException(status_code=400, detail="Transaction hash already exists")
     except Exception as e:
         logger.error(f"Error recording contribution: {e}")
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@app.route('/stats', methods=['GET', 'OPTIONS'])
-def get_stats():
+@app.get("/stats", response_model=StatsResponse)
+async def get_stats(network: str = Depends(get_network_from_header)):
     """Get current presale statistics"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        network = get_network_from_header()
         with get_db_connection() as conn:
             # Get totals by currency
             stats = conn.execute('''
@@ -301,33 +329,28 @@ def get_stats():
             
             logger.info(f"Stats requested for {network}: ${total_raised_usd:.2f} raised, {unique_contributors} contributors")
             
-            return jsonify({
-                "total_sol": round(total_sol, 4),
-                "total_usdc": round(total_usdc, 2),
-                "total_usd": round(total_usd, 2),
-                "total_raised_usd": round(total_raised_usd, 2),
-                "contributor_count": unique_contributors,
-                "total_contributions": total_contributions,
-                "progress_percentage": round(progress_percentage, 2)
-            })
+            return StatsResponse(
+                total_sol=round(total_sol, 4),
+                total_usdc=round(total_usdc, 2),
+                total_usd=round(total_usd, 2),
+                total_raised_usd=round(total_raised_usd, 2),
+                contributor_count=unique_contributors,
+                total_contributions=total_contributions,
+                progress_percentage=round(progress_percentage, 2)
+            )
             
     except Exception as e:
         logger.error(f"Error fetching stats for {network}: {e}")
-        return jsonify({"error": f"Failed to fetch statistics: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to fetch statistics: {str(e)}")
 
-@app.route('/contributions', methods=['GET', 'OPTIONS'])
-def get_contributions():
+@app.get("/contributions", response_model=List[ContributorStats])
+async def get_contributions(
+    limit: int = 50,
+    offset: int = 0,
+    network: str = Depends(get_network_from_header)
+):
     """Get list of contributions for leaderboard"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        network = get_network_from_header()
-        limit = request.args.get('limit', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
-        
-        sol_rate = get_solana_price()
-        
         with get_db_connection() as conn:
             contributions = conn.execute('''
                 SELECT wallet, amount, currency, method, timestamp
@@ -342,34 +365,32 @@ def get_contributions():
                     END DESC,
                     timestamp DESC
                 LIMIT ? OFFSET ?
-            ''', (network, sol_rate, USDC_TO_USD_RATE, limit, offset)).fetchall()
+            ''', (network, SOL_TO_USD_RATE, USDC_TO_USD_RATE, limit, offset)).fetchall()
             
             logger.info(f"Contributions requested for {network}: {len(contributions)} found")
             
-            result = []
-            for contrib in contributions:
-                result.append({
-                    "wallet": contrib['wallet'],
-                    "amount": float(contrib['amount']),
-                    "currency": contrib['currency'],
-                    "method": contrib['method'],
-                    "timestamp": contrib['timestamp']
-                })
-            
-            return jsonify(result)
+            return [
+                ContributorStats(
+                    wallet=contrib['wallet'],
+                    amount=float(contrib['amount']),
+                    currency=contrib['currency'],
+                    method=contrib['method'],
+                    timestamp=contrib['timestamp']
+                )
+                for contrib in contributions
+            ]
             
     except Exception as e:
         logger.error(f"Error fetching contributions for {network}: {e}")
-        return jsonify({"error": f"Failed to fetch contributions: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to fetch contributions: {str(e)}")
 
-@app.route('/contribution/<tx_hash>', methods=['GET', 'OPTIONS'])
-def get_contribution_by_hash(tx_hash):
+@app.get("/contribution/{tx_hash}")
+async def get_contribution_by_hash(
+    tx_hash: str,
+    network: str = Depends(get_network_from_header)
+):
     """Get specific contribution by transaction hash"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        network = get_network_from_header()
         with get_db_connection() as conn:
             contribution = conn.execute('''
                 SELECT * FROM contributions 
@@ -377,9 +398,9 @@ def get_contribution_by_hash(tx_hash):
             ''', (tx_hash, network)).fetchone()
             
             if not contribution:
-                return jsonify({"error": "Contribution not found"}), 404
+                raise HTTPException(status_code=404, detail="Contribution not found")
             
-            return jsonify({
+            return {
                 "id": contribution['id'],
                 "wallet": contribution['wallet'],
                 "amount": contribution['amount'],
@@ -390,20 +411,21 @@ def get_contribution_by_hash(tx_hash):
                 "timestamp": contribution['timestamp'],
                 "created_at": contribution['created_at'],
                 "usd_value": convert_to_usd(contribution['amount'], contribution['currency'])
-            })
+            }
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching contribution by hash: {e}")
-        return jsonify({"error": f"Failed to fetch contribution: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to fetch contribution: {str(e)}")
 
-@app.route('/wallet/<wallet_address>', methods=['GET', 'OPTIONS'])
-def get_wallet_contributions(wallet_address):
+@app.get("/wallet/{wallet_address}")
+async def get_wallet_contributions(
+    wallet_address: str,
+    network: str = Depends(get_network_from_header)
+):
     """Get all contributions from a specific wallet"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        network = get_network_from_header()
         with get_db_connection() as conn:
             contributions = conn.execute('''
                 SELECT * FROM contributions 
@@ -429,26 +451,25 @@ def get_wallet_contributions(wallet_address):
                     "usd_value": usd_value
                 })
             
-            return jsonify({
+            return {
                 "wallet": wallet_address,
                 "network": network,
                 "total_contributions": len(contributions),
                 "total_usd_value": round(total_usd, 2),
                 "contributions": contribution_list
-            })
+            }
             
     except Exception as e:
         logger.error(f"Error fetching wallet contributions: {e}")
-        return jsonify({"error": f"Failed to fetch wallet contributions: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to fetch wallet contributions: {str(e)}")
 
-@app.route('/contribution/<int:contribution_id>', methods=['DELETE', 'OPTIONS'])
-def delete_contribution(contribution_id):
+@app.delete("/contribution/{contribution_id}")
+async def delete_contribution(
+    contribution_id: int,
+    network: str = Depends(get_network_from_header)
+):
     """Delete a contribution (admin only - add authentication in production)"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        network = get_network_from_header()
         with get_db_connection() as conn:
             # Check if contribution exists
             existing = conn.execute('''
@@ -457,7 +478,7 @@ def delete_contribution(contribution_id):
             ''', (contribution_id, network)).fetchone()
             
             if not existing:
-                return jsonify({"error": "Contribution not found"}), 404
+                raise HTTPException(status_code=404, detail="Contribution not found")
             
             # Delete the contribution
             conn.execute('''
@@ -469,7 +490,7 @@ def delete_contribution(contribution_id):
             
             logger.info(f"Contribution {contribution_id} deleted from {network} network")
             
-            return jsonify({
+            return {
                 "success": True,
                 "message": f"Contribution {contribution_id} deleted successfully",
                 "deleted_contribution": {
@@ -478,22 +499,21 @@ def delete_contribution(contribution_id):
                     "amount": existing['amount'],
                     "currency": existing['currency']
                 }
-            })
+            }
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting contribution: {e}")
-        return jsonify({"error": f"Failed to delete contribution: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to delete contribution: {str(e)}")
 
-@app.route('/export', methods=['GET', 'OPTIONS'])
-def export_contributions():
+@app.get("/export")
+async def export_contributions(
+    format: str = "json",
+    network: str = Depends(get_network_from_header)
+):
     """Export all contributions (admin only - add authentication in production)"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        network = get_network_from_header()
-        format = request.args.get('format', 'json')
-        
         with get_db_connection() as conn:
             contributions = conn.execute('''
                 SELECT * FROM contributions 
@@ -503,6 +523,10 @@ def export_contributions():
             
             if format.lower() == "csv":
                 # Return CSV format
+                import io
+                import csv
+                from fastapi.responses import StreamingResponse
+                
                 output = io.StringIO()
                 writer = csv.writer(output)
                 
@@ -527,11 +551,11 @@ def export_contributions():
                 
                 output.seek(0)
                 
-                # Create response with CSV data
-                response = make_response(output.getvalue())
-                response.headers['Content-Type'] = 'text/csv'
-                response.headers['Content-Disposition'] = f'attachment; filename=chesssol_contributions_{network}.csv'
-                return response
+                return StreamingResponse(
+                    io.BytesIO(output.getvalue().encode()),
+                    media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=chesssol_contributions_{network}.csv"}
+                )
             else:
                 # Return JSON format with enhanced data
                 contributions_data = []
@@ -546,27 +570,22 @@ def export_contributions():
                         'usd_value': usd_value
                     })
                 
-                return jsonify({
+                return {
                     "network": network,
                     "export_date": datetime.now().isoformat(),
                     "total_contributions": len(contributions),
                     "total_usd_value": round(total_usd, 2),
                     "contributions": contributions_data
-                })
+                }
             
     except Exception as e:
         logger.error(f"Error exporting contributions: {e}")
-        return jsonify({"error": f"Failed to export contributions: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to export contributions: {str(e)}")
 
-@app.route('/analytics/<network>', methods=['GET', 'OPTIONS'])
-def get_analytics(network):
+@app.get("/analytics/{network}")
+async def get_analytics(network: str):
     """Get detailed analytics for a specific network"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     try:
-        sol_rate = get_solana_price()
-        
         with get_db_connection() as conn:
             # Daily contribution totals
             daily_stats = conn.execute('''
@@ -580,7 +599,7 @@ def get_analytics(network):
                 GROUP BY DATE(timestamp)
                 ORDER BY date DESC
                 LIMIT 30
-            ''', (sol_rate, USDC_TO_USD_RATE, network)).fetchall()
+            ''', (SOL_TO_USD_RATE, USDC_TO_USD_RATE, network)).fetchall()
             
             # Method breakdown
             method_stats = conn.execute('''
@@ -592,7 +611,7 @@ def get_analytics(network):
                 FROM contributions 
                 WHERE network = ?
                 GROUP BY method
-            ''', (sol_rate, USDC_TO_USD_RATE, network)).fetchall()
+            ''', (SOL_TO_USD_RATE, USDC_TO_USD_RATE, network)).fetchall()
             
             # Currency breakdown
             currency_stats = conn.execute('''
@@ -606,26 +625,75 @@ def get_analytics(network):
                 GROUP BY currency
             ''', (network,)).fetchall()
             
-            return jsonify({
+            return {
                 "network": network,
                 "generated_at": datetime.now().isoformat(),
                 "daily_stats": [dict(row) for row in daily_stats],
                 "method_breakdown": [dict(row) for row in method_stats],
                 "currency_breakdown": [dict(row) for row in currency_stats]
-            })
+            }
             
     except Exception as e:
         logger.error(f"Error fetching analytics: {e}")
-        return jsonify({"error": f"Failed to fetch analytics: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
 
-@app.route('/dev/reset/<network>', methods=['GET', 'OPTIONS'])
-def reset_network_data(network):
+# Enhanced error handlers
+@app.exception_handler(404)
+async def not_found_handler(request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "Endpoint not found", 
+            "status_code": 404,
+            "path": str(request.url),
+            "method": request.method
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+@app.exception_handler(500)
+async def internal_error_handler(request, exc):
+    logger.error(f"Internal server error on {request.method} {request.url}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error", 
+            "status_code": 500,
+            "message": "An unexpected error occurred. Please try again later."
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+@app.exception_handler(400)
+async def bad_request_handler(request, exc):
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Bad request",
+            "status_code": 400,
+            "detail": str(exc.detail) if hasattr(exc, 'detail') else "Invalid request"
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+# Development helper endpoint
+@app.get("/dev/reset/{network}")
+async def reset_network_data(network: str):
     """Reset all data for a specific network (development only)"""
-    if request.method == 'OPTIONS':
-        return make_response('', 200)
-    
     if network not in ['dev', 'testnet']:
-        return jsonify({"error": "Reset only allowed for dev/testnet networks"}), 403
+        raise HTTPException(status_code=403, detail="Reset only allowed for dev/testnet networks")
     
     try:
         with get_db_connection() as conn:
@@ -635,42 +703,23 @@ def reset_network_data(network):
             
             logger.warning(f"RESET: Deleted {deleted_count} contributions from {network} network")
             
-            return jsonify({
+            return {
                 "success": True,
                 "message": f"Reset {network} network data",
                 "deleted_contributions": deleted_count
-            })
+            }
             
     except Exception as e:
         logger.error(f"Error resetting {network} data: {e}")
-        return jsonify({"error": f"Failed to reset data: {str(e)}"}), 500
-
-# Error handlers
-@app.errorhandler(404)
-def not_found_handler(e):
-    return jsonify({
-        "error": "Endpoint not found", 
-        "status_code": 404,
-        "path": request.path,
-        "method": request.method
-    }), 404
-
-@app.errorhandler(500)
-def internal_error_handler(e):
-    logger.error(f"Internal server error on {request.method} {request.path}: {e}")
-    return jsonify({
-        "error": "Internal server error", 
-        "status_code": 500,
-        "message": "An unexpected error occurred. Please try again later."
-    }), 500
-
-@app.errorhandler(400)
-def bad_request_handler(e):
-    return jsonify({
-        "error": "Bad request",
-        "status_code": 400,
-        "detail": str(e) if hasattr(e, 'description') else "Invalid request"
-    }), 400
+        raise HTTPException(status_code=500, detail=f"Failed to reset data: {str(e)}")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8001, debug=True)
+    import uvicorn
+    # For direct script execution, disable reload to avoid the warning
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8001,
+        reload=False,  # Disable reload when running directly
+        log_level="info"
+    )
