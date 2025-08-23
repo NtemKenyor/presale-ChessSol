@@ -14,6 +14,10 @@ from decimal import Decimal
 import requests
 import io
 import csv
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +29,14 @@ app.config['JSON_SORT_KEYS'] = False
 
 # Enhanced CORS configuration
 CORS(app, origins="*", supports_credentials=True, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+
+
+MAIN_RPC = os.getenv("mainnet")
+DEVNET_RPC = os.getenv("devnet")
+if not MAIN_RPC:
+    raise ValueError("MAIN_RPC is not set in .env file!")
+elif not DEVNET_RPC:
+    raise ValueError("DEVNET_RPC is not set in .env file!")
 
 # Database configuration
 DATABASE_FILE = "chesssol_presale.db"
@@ -361,6 +373,33 @@ def get_contributions():
     except Exception as e:
         logger.error(f"Error fetching contributions for {network}: {e}")
         return jsonify({"error": f"Failed to fetch contributions: {str(e)}"}), 500
+
+@app.route("/rpc_main", methods=["POST"])
+def proxy_rpc():
+    try:
+        # Forward JSON-RPC request to QuickNode
+        response = requests.post(
+            MAIN_RPC,
+            json=request.json,
+            headers={"Content-Type": "application/json"}
+        )
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/rpc_dev", methods=["POST"])
+def proxy_rpc():
+    try:
+        # Forward JSON-RPC request to QuickNode
+        response = requests.post(
+            DEVNET_RPC,
+            json=request.json,
+            headers={"Content-Type": "application/json"}
+        )
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/contribution/<tx_hash>', methods=['GET', 'OPTIONS'])
 def get_contribution_by_hash(tx_hash):
