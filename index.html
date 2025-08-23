@@ -616,15 +616,27 @@
         // Network detection from URL params
         const urlParams = new URLSearchParams(window.location.search);
         const isDevMode = urlParams.get('network') === 'dev';
+
+        // Detect environment
+        const hostname_ = window.location.hostname;
+        const port_ = window.location.port;
+
+        const isLocalMode = (
+            hostname_ === "localhost" ||
+            hostname_ === "127.0.0.1"
+        );
         
         // Configuration based on network
         const CONFIG = {
             TREASURY_WALLET: isDevMode 
                 ? '3Wj9BHs2N75vgEKNGM62QGEPToRQcopK1giZCG2iMCX3' // Your devnet wallet
                 : 'CXDdQc9jzr1ufkj3G51oYuUX8GnFBPAT76yrmnEYRAPa', // Your mainnet wallet
-            API_BASE_URL: isDevMode 
-                ? 'http://127.0.0.1:8001' // 'http://0.0.0.0:8001' // 'http://localhost:8001' // Dev API
-                : 'https://api.chesssol.com', // Production API
+            // API_BASE_URL: isDevMode 
+            //     ? 'http://127.0.0.1:8001' // 'http://0.0.0.0:8001' // 'http://localhost:8001' // Dev API
+            //     : 'https://roynek.com/presale-ChessSol/API/', // Production API
+            API_BASE_URL : isLocalMode
+                ? "http://127.0.0.1:8001"
+                : "https://roynek.com/presale-ChessSol/API/", // Production
             FLUTTERWAVE_PUBLIC_KEY: isDevMode 
                 ? 'FLWPUBK_TEST-2e1916b73be8b0d2011af6d4366e00b2-X' // Test key for demos
                 : 'FLWPUBK-9535229707e778e50c2265f91e25f0bd-X', // Live key for production
