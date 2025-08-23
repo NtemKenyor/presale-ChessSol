@@ -375,7 +375,7 @@ def get_contributions():
         return jsonify({"error": f"Failed to fetch contributions: {str(e)}"}), 500
 
 @app.route("/rpc_main", methods=["POST"])
-def proxy_rpc():
+def proxy_rpc_main():
     try:
         # Forward JSON-RPC request to QuickNode
         response = requests.post(
@@ -388,7 +388,7 @@ def proxy_rpc():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/rpc_dev", methods=["POST"])
-def proxy_rpc():
+def proxy_rpc_dev():
     try:
         # Forward JSON-RPC request to QuickNode
         response = requests.post(
