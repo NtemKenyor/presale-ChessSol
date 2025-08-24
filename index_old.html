@@ -4,9 +4,69 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ChessSol Presale - Own Chess, Play Chess, Grow Chess</title>
-    <!-- Load Solana Web3 library -->
-    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.js"></script>
-    <script src="https://unpkg.com/@solana/spl-token@latest/lib/index.iife.js"></script>
+    <!-- Load libraries with fallback handling -->
+    <script>
+        // Web3 library fallback
+        window.web3LoadAttempts = 0;
+        window.solanaWeb3LoadAttempts = 0;
+        
+        function loadWeb3Libraries() {
+            const loadScript = (src, onLoad, onError, retries = 3) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = onLoad;
+                script.onerror = () => {
+                    if (retries > 0) {
+                        console.log(`Retrying ${src}, attempts left: ${retries}`);
+                        setTimeout(() => loadScript(src, onLoad, onError, retries - 1), 1000);
+                    } else {
+                        onError();
+                    }
+                };
+                document.head.appendChild(script);
+            };
+            
+            // Load Solana Web3 with fallback
+            loadScript(
+                'https://unpkg.com/@solana/web3.js@latest/lib/index.iife.js',
+                () => {
+                    console.log('Solana Web3 loaded successfully');
+                    window.solanaWeb3Available = true;
+                },
+                () => {
+                    console.warn('Failed to load Solana Web3, trying alternative CDN...');
+                    loadScript(
+                        'https://cdn.jsdelivr.net/npm/@solana/web3.js@1.87.6/lib/index.iife.min.js',
+                        () => {
+                            console.log('Solana Web3 loaded from alternative CDN');
+                            window.solanaWeb3Available = true;
+                        },
+                        () => {
+                            console.error('Failed to load Solana Web3 from all sources');
+                            window.solanaWeb3Available = false;
+                        }
+                    );
+                }
+            );
+            
+            // Load SPL Token library
+            loadScript(
+                'https://unpkg.com/@solana/spl-token@latest/lib/index.iife.js',
+                () => {
+                    console.log('SPL Token library loaded');
+                    window.splTokenAvailable = true;
+                },
+                () => {
+                    console.warn('SPL Token library failed to load, USDC transfers may not work');
+                    window.splTokenAvailable = false;
+                }
+            );
+        }
+        
+        // Load libraries immediately
+        // loadWeb3Libraries();
+    </script>
+    <script src="assets/js/solana.js" defer></script>
     <script src="https://checkout.flutterwave.com/v3.js"></script>
     <style>
         * {
@@ -212,53 +272,6 @@
             transform: none !important;
         }
         
-        .wallet-options {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .wallet-option {
-            padding: 15px;
-            border: 2px solid #333;
-            border-radius: 12px;
-            background: #0f0f0f;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-align: center;
-            position: relative;
-        }
-        
-        .wallet-option:hover {
-            border-color: #ffd700;
-            background: rgba(255, 215, 0, 0.05);
-        }
-        
-        .wallet-option.disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-        
-        .wallet-option.disabled:hover {
-            border-color: #333;
-            background: #0f0f0f;
-        }
-        
-        .wallet-name {
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .wallet-status {
-            font-size: 12px;
-            color: #888;
-        }
-        
-        .wallet-status.available {
-            color: #22c55e;
-        }
-        
         .progress-section {
             margin-bottom: 30px;
         }
@@ -364,13 +377,18 @@
             background: rgba(255, 215, 0, 0.05);
         }
         
-        .connected-wallet {
+        .wallet-status {
             text-align: center;
             padding: 20px;
             border-radius: 12px;
-            background: rgba(74, 222, 128, 0.1);
+            background: #0f0f0f;
             margin-bottom: 25px;
-            border: 1px solid #4ade80;
+            border: 1px solid #333;
+        }
+        
+        .status-connected {
+            border-color: #4ade80;
+            background: rgba(74, 222, 128, 0.1);
         }
         
         .message {
@@ -403,6 +421,38 @@
             margin-top: 40px;
         }
         
+        .payment-methods {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .payment-method {
+            padding: 20px;
+            border: 2px solid #333;
+            border-radius: 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #0f0f0f;
+        }
+        
+        .payment-method:hover {
+            border-color: #ffd700;
+            background: rgba(255, 215, 0, 0.05);
+        }
+        
+        .payment-method.selected {
+            border-color: #ffd700;
+            background: rgba(255, 215, 0, 0.1);
+        }
+        
+        .payment-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
         .loading-indicator {
             display: none;
             text-align: center;
@@ -425,7 +475,7 @@
                 gap: 15px;
             }
             
-            .wallet-options {
+            .payment-methods {
                 grid-template-columns: 1fr;
             }
         }
@@ -435,7 +485,9 @@
     <div class="container">
         <div class="header">
             <div class="logo-container">
-                <div class="logo">♛</div>
+                <div class="logo">♔</div>
+                <!-- If you have logo.png, replace the div above with: -->
+                <!-- <img src="logo.png" alt="ChessSol" class="logo" style="border-radius: 20px;"> -->
             </div>
             <h1 class="title">ChessSol</h1>
             <p class="tagline">"Own Chess, Play Chess, Grow Chess"</p>
@@ -452,18 +504,11 @@
                 
                 <!-- Crypto Payment Tab -->
                 <div class="tab-content active" id="crypto-tab">
-                    <div id="walletSelection">
-                        <div class="form-label">Choose Your Wallet</div>
-                        <div class="wallet-options" id="walletOptions">
-                            <!-- Wallet options will be populated here -->
-                        </div>
+                    <div class="wallet-status" id="walletStatus">
+                        <p>Connect your Phantom wallet to contribute with crypto</p>
                     </div>
                     
-                    <div id="connectedWallet" style="display: none;" class="connected-wallet">
-                        <p style="color: #22c55e; font-weight: 600;">✅ Wallet Connected</p>
-                        <p style="font-size: 0.9rem; color: #888; margin-top: 5px;" id="walletAddress"></p>
-                        <p style="font-size: 0.8rem; color: #666; margin-top: 5px;" id="walletBalance"></p>
-                    </div>
+                    <button class="btn btn-secondary" id="connectWallet">Connect Phantom Wallet</button>
                     
                     <div id="cryptoForm" style="display: none;">
                         <div class="form-group">
@@ -483,10 +528,6 @@
                         </div>
                         
                         <button class="btn btn-primary" id="cryptoContributeBtn">Contribute with Crypto</button>
-                        
-                        <button class="btn btn-secondary" id="disconnectWallet" style="margin-top: 15px;">
-                            Disconnect Wallet
-                        </button>
                     </div>
                 </div>
                 
@@ -578,7 +619,12 @@
 
         // Detect environment
         const hostname_ = window.location.hostname;
-        const isLocalMode = (hostname_ === "localhost" || hostname_ === "127.0.0.1");
+        const port_ = window.location.port;
+
+        const isLocalMode = (
+            hostname_ === "localhost" ||
+            hostname_ === "127.0.0.1"
+        );
 
         // Default SOL price
         let solToUsdRate = 150;
@@ -588,6 +634,9 @@
             TREASURY_WALLET: isDevMode 
                 ? '3Wj9BHs2N75vgEKNGM62QGEPToRQcopK1giZCG2iMCX3' // Your devnet wallet
                 : 'CXDdQc9jzr1ufkj3G51oYuUX8GnFBPAT76yrmnEYRAPa', // Your mainnet wallet
+            // API_BASE_URL: isDevMode 
+            //     ? 'http://127.0.0.1:8001' // 'http://0.0.0.0:8001' // 'http://localhost:8001' // Dev API
+            //     : 'https://roynek.com/presale-ChessSol/API/', // Production API
             API_BASE_URL : isLocalMode
                 ? "http://127.0.0.1:8001"
                 : "https://roynek.com/presale-ChessSol/API", // Production
@@ -595,17 +644,33 @@
                 ? 'FLWPUBK_TEST-2e1916b73be8b0d2011af6d4366e00b2-X' // Test key for demos
                 : 'FLWPUBK-9535229707e778e50c2265f91e25f0bd-X', // Live key for production
             SOLANA_NETWORK: isDevMode ? 'devnet' : 'mainnet-beta',
-            SOL_TO_USD_RATE: solToUsdRate,
+            SOL_TO_USD_RATE: solToUsdRate, // Should fetch from API in production
             USDC_TO_USD_RATE: 1,
             USDC_MINT: isDevMode 
                 ? '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' // Devnet USDC
                 : 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' // Mainnet USDC
         };
 
+
         CONFIG.SOLANA_RPC_URL = isDevMode 
                 ? CONFIG.API_BASE_URL + "/rpc_dev" // Devnet RPC URL
                 : CONFIG.API_BASE_URL + "/rpc_main"; // Mainnet RPC URL
 
+        console.log(CONFIG.SOLANA_RPC_URL);
+
+        // Update SOL price from backend
+        fetch("https://chesssol.com/api/chesssol/backend/solana-price")
+        .then(res => res.json())
+        .then(data => {
+            if (data && data.price) {
+            CONFIG.SOL_TO_USD_RATE = parseFloat(data.price);
+            console.log("Live SOL price updated:", CONFIG.SOL_TO_USD_RATE);
+            }
+        })
+        .catch(err => {
+            console.warn("Using fallback SOL price:", CONFIG.SOL_TO_USD_RATE, err);
+        });
+        
         // Network indicator
         if (isDevMode) {
             document.body.style.borderTop = '5px solid #ff6b6b';
@@ -621,309 +686,130 @@
         // Global state
         let walletConnected = false;
         let walletAddress = '';
-        let currentProvider = null;
-        let currentWalletName = '';
+        let provider = null;
         
-        // Improved wallet detection with better error handling
-        const WALLET_ADAPTERS = {
-            phantom: {
-                name: 'Phantom',
-                icon: '👻',
-                website: 'https://phantom.app/',
-                detect: () => {
-                    if (typeof window !== 'undefined' && window.solana && window.solana.isPhantom) {
-                        return window.solana;
+        // Wait for libraries to load with timeout
+        function waitForLibraries() {
+            return new Promise((resolve) => {
+                const checkLibraries = () => {
+                    if (typeof solanaWeb3 !== 'undefined' || window.solanaWeb3Available === false) {
+                        resolve();
+                    } else {
+                        setTimeout(checkLibraries, 100);
                     }
-                    return null;
-                },
-                connect: async () => {
-                    if (window.solana && window.solana.isPhantom) {
-                        const resp = await window.solana.connect();
-                        return {
-                            provider: window.solana,
-                            publicKey: resp.publicKey.toString()
-                        };
-                    }
-                    throw new Error('Phantom wallet not found');
-                }
-            },
-            solflare: {
-                name: 'Solflare',
-                icon: '🔥',
-                website: 'https://solflare.com/',
-                detect: () => {
-                    if (typeof window !== 'undefined' && window.solflare && window.solflare.isSolflare) {
-                        return window.solflare;
-                    }
-                    return null;
-                },
-                connect: async () => {
-                    if (window.solflare && window.solflare.isSolflare) {
-                        await window.solflare.connect();
-                        return {
-                            provider: window.solflare,
-                            publicKey: window.solflare.publicKey.toString()
-                        };
-                    }
-                    throw new Error('Solflare wallet not found');
-                }
-            },
-            backpack: {
-                name: 'Backpack',
-                icon: '🎒',
-                website: 'https://backpack.app/',
-                detect: () => {
-                    if (typeof window !== 'undefined' && window.backpack && window.backpack.isBackpack) {
-                        return window.backpack;
-                    }
-                    return null;
-                },
-                connect: async () => {
-                    if (window.backpack && window.backpack.isBackpack) {
-                        const resp = await window.backpack.connect();
-                        return {
-                            provider: window.backpack,
-                            publicKey: resp.publicKey.toString()
-                        };
-                    }
-                    throw new Error('Backpack wallet not found');
-                }
-            },
-            coin98: {
-                name: 'Coin98',
-                icon: '🪙',
-                website: 'https://coin98.com/',
-                detect: () => {
-                    if (typeof window !== 'undefined' && window.coin98 && window.coin98.sol) {
-                        return window.coin98.sol;
-                    }
-                    return null;
-                },
-                connect: async () => {
-                    if (window.coin98 && window.coin98.sol) {
-                        const resp = await window.coin98.sol.connect();
-                        return {
-                            provider: window.coin98.sol,
-                            publicKey: resp.publicKey.toString()
-                        };
-                    }
-                    throw new Error('Coin98 wallet not found');
-                }
-            },
-            slope: {
-                name: 'Slope',
-                icon: '📈',
-                website: 'https://slope.finance/',
-                detect: () => {
-                    if (typeof window !== 'undefined' && window.Slope) {
-                        return window.Slope;
-                    }
-                    return null;
-                },
-                connect: async () => {
-                    if (window.Slope) {
-                        const resp = await window.Slope.connect();
-                        return {
-                            provider: window.Slope,
-                            publicKey: resp.data.publicKey
-                        };
-                    }
-                    throw new Error('Slope wallet not found');
-                }
-            }
-        };
+                };
+                checkLibraries();
+                
+                // Timeout after 10 seconds
+                setTimeout(resolve, 10000);
+            });
+        }
         
         // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
+                // Remove active class from all tabs and contents
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                 
+                // Add active class to clicked tab
                 tab.classList.add('active');
                 document.getElementById(`${tab.dataset.tab}-tab`).classList.add('active');
             });
         });
         
-        // Initialize wallet detection with improved logic
-        function initializeWalletDetection() {
-            const walletOptionsContainer = document.getElementById('walletOptions');
-            
-            // Wait a bit for wallets to inject their providers
-            setTimeout(() => {
-                const availableWallets = Object.entries(WALLET_ADAPTERS).map(([key, adapter]) => {
-                    const provider = adapter.detect();
-                    return {
-                        key,
-                        ...adapter,
-                        available: !!provider,
-                        provider
-                    };
-                });
-                
-                // Sort available wallets first
-                availableWallets.sort((a, b) => b.available - a.available);
-                
-                console.log('Available wallets:', availableWallets.filter(w => w.available).map(w => w.name));
-                
-                walletOptionsContainer.innerHTML = availableWallets.map(wallet => `
-                    <div class="wallet-option ${wallet.available ? '' : 'disabled'}" 
-                         data-wallet="${wallet.key}">
-                        <div class="wallet-name">${wallet.icon} ${wallet.name}</div>
-                        <div class="wallet-status ${wallet.available ? 'available' : ''}"}>
-                            ${wallet.available ? 'Available' : 'Not Installed'}
-                        </div>
-                    </div>
-                `).join('');
-                
-                // Add click handlers
-                walletOptionsContainer.addEventListener('click', (e) => {
-                    const walletOption = e.target.closest('.wallet-option');
-                    if (!walletOption) return;
-                    
-                    const walletKey = walletOption.dataset.wallet;
-                    
-                    if (walletOption.classList.contains('disabled')) {
-                        const wallet = WALLET_ADAPTERS[walletKey];
-                        if (wallet) {
-                            window.open(wallet.website, '_blank');
-                        }
-                    } else {
-                        connectWallet(walletKey);
-                    }
-                });
-            }, 1500); // Give wallets more time to load
-        }
-        
-        // Improved wallet connection function
-        async function connectWallet(walletKey) {
-            const adapter = WALLET_ADAPTERS[walletKey];
-            if (!adapter) {
-                showError('Wallet adapter not found');
-                return;
-            }
-            
+        // Wallet connection with network switching and library checking
+        async function connectWallet() {
             try {
-                showStatus(`Connecting to ${adapter.name}...`);
+                // Wait for libraries to load
+                await waitForLibraries();
                 
-                // Check if wallet is available
-                if (!adapter.detect()) {
-                    throw new Error(`${adapter.name} wallet not detected. Please install it first.`);
+                // Check if Web3 libraries are available
+                if (typeof solanaWeb3 === 'undefined') {
+                    throw new Error('Solana Web3 library failed to load. Please refresh the page and try again.');
                 }
                 
-                // Connect to wallet
-                const connectionResult = await adapter.connect();
-                
-                currentProvider = connectionResult.provider;
-                walletAddress = connectionResult.publicKey;
-                currentWalletName = adapter.name;
-                walletConnected = true;
-                
-                console.log(`Connected to ${adapter.name}:`, walletAddress);
-                
-                updateWalletUI();
-                await fetchWalletBalance();
-                
-                showSuccess(`Successfully connected to ${adapter.name}!`);
-                
-            } catch (error) {
-                console.error('Wallet connection error:', error);
-                
-                // Handle specific error cases
-                if (error.message.includes('User rejected')) {
-                    showError('Connection cancelled by user');
-                } else if (error.message.includes('not found') || error.message.includes('not detected')) {
-                    showError(`${adapter.name} wallet not found. Please install it first.`);
+                if ('solana' in window && window.solana.isPhantom) {
+                    provider = window.solana;
+                    
+                    // Switch to correct network (this might not work on all wallets)
+                    try {
+                        await provider.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: CONFIG.SOLANA_NETWORK }],
+                        });
+                    } catch (switchError) {
+                        console.log('Network switch not supported, continuing...');
+                    }
+                    
+                    const response = await provider.connect();
+                    walletAddress = response.publicKey.toString();
+                    walletConnected = true;
+                    
+                    updateWalletStatus();
+                    document.getElementById('cryptoForm').style.display = 'block';
+                    document.getElementById('connectWallet').style.display = 'none';
+                    
+                    // Fetch wallet balance for better UX
+                    await fetchWalletBalance();
+                    
                 } else {
-                    showError(`Failed to connect to ${adapter.name}: ${error.message}`);
+                    throw new Error('Phantom wallet not found. Please install Phantom wallet extension.');
                 }
-                
-                // Reset state on error
-                currentProvider = null;
-                walletAddress = '';
-                currentWalletName = '';
-                walletConnected = false;
+            } catch (error) {
+                showError('Failed to connect wallet: ' + error.message);
             }
         }
         
-        // Update wallet UI
-        function updateWalletUI() {
-            if (walletConnected) {
-                document.getElementById('walletSelection').style.display = 'none';
-                document.getElementById('connectedWallet').style.display = 'block';
-                document.getElementById('cryptoForm').style.display = 'block';
-                
-                const addressElement = document.getElementById('walletAddress');
-                addressElement.innerHTML = `
-                    <strong>${currentWalletName}:</strong> ${walletAddress.slice(0, 8)}...${walletAddress.slice(-8)}
-                `;
-            } else {
-                document.getElementById('walletSelection').style.display = 'block';
-                document.getElementById('connectedWallet').style.display = 'none';
-                document.getElementById('cryptoForm').style.display = 'none';
-            }
-        }
-        
-        // Improved balance fetching with better error handling
+        // Fetch wallet balance with library check
         async function fetchWalletBalance() {
             try {
-                if (!currentProvider || !walletAddress || typeof solanaWeb3 === 'undefined') {
-                    console.warn('Missing requirements for balance fetch');
-                    return;
-                }
+                if (!provider || !walletAddress || typeof solanaWeb3 === 'undefined') return;
                 
                 // const connection = new solanaWeb3.Connection(
-                //     solanaWeb3.clusterApiUrl(CONFIG.SOLANA_NETWORK),
-                //     'confirmed'
+                //     solanaWeb3.clusterApiUrl(CONFIG.SOLANA_NETWORK)
                 // );
 
                 const connection = new solanaWeb3.Connection(
-                    CONFIG.SOLANA_RPC_URL, // Your Flask endpoint
-                    'confirmed'
+                    CONFIG.SOLANA_RPC_URL// Your Flask endpoint
                 );
                 
                 const publicKey = new solanaWeb3.PublicKey(walletAddress);
                 const balance = await connection.getBalance(publicKey);
                 const solBalance = balance / solanaWeb3.LAMPORTS_PER_SOL;
                 
-                document.getElementById('walletBalance').textContent = `Balance: ${solBalance.toFixed(4)} SOL`;
+                // Update UI with balance info
+                const balanceInfo = document.createElement('div');
+                balanceInfo.style.cssText = 'font-size: 12px; color: #888; margin-top: 5px;';
+                balanceInfo.textContent = `Balance: ${solBalance.toFixed(4)} SOL`;
+                document.getElementById('walletStatus').appendChild(balanceInfo);
                 
             } catch (error) {
                 console.error('Failed to fetch balance:', error);
-                document.getElementById('walletBalance').textContent = 'Balance: Unable to fetch';
             }
         }
         
-        // Disconnect wallet
-        function disconnectWallet() {
-            try {
-                if (currentProvider && typeof currentProvider.disconnect === 'function') {
-                    currentProvider.disconnect();
-                }
-            } catch (error) {
-                console.error('Disconnect error:', error);
+        function updateWalletStatus() {
+            const statusElement = document.getElementById('walletStatus');
+            if (walletConnected) {
+                statusElement.className = 'wallet-status status-connected';
+                statusElement.innerHTML = `
+                    <p style="color: #22c55e; font-weight: 600;">✅ Wallet Connected</p>
+                    <p style="font-size: 0.9rem; color: #888; margin-top: 5px;">
+                        ${walletAddress.slice(0, 8)}...${walletAddress.slice(-8)}
+                    </p>
+                `;
             }
-            
-            walletConnected = false;
-            walletAddress = '';
-            currentProvider = null;
-            currentWalletName = '';
-            
-            updateWalletUI();
-            showSuccess('Wallet disconnected successfully');
         }
         
-        // Improved crypto contribution function
+        // Crypto contribution with real transactions and library checks
         async function contributeCrypto() {
             try {
-                if (!walletConnected || !currentProvider) {
-                    throw new Error('Please connect a wallet first');
-                }
-                
                 const currency = document.getElementById('cryptoCurrency').value;
                 const amount = parseFloat(document.getElementById('cryptoAmount').value);
                 
-                if (!amount || amount <= 0) {
-                    throw new Error('Please enter a valid amount');
+                if (!amount) {
+                    throw new Error('Please enter an amount');
                 }
                 
                 if ((currency === 'SOL' && amount < 0.1) || (currency === 'USDC' && amount < 5)) {
@@ -934,214 +820,41 @@
                 btn.disabled = true;
                 btn.textContent = 'Creating Transaction...';
                 
-                // Create transaction
+                // Create real transaction or simulate in dev mode
                 let txHash;
                 if (isDevMode) {
-                    // In dev mode, we can simulate or do real devnet transaction
-                    btn.textContent = 'Please approve transaction...';
-                    txHash = await createSolanaTransaction(amount, currency);
+                    // Simulate in dev mode for faster testing
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    if (typeof solanaWeb3 !== 'undefined') {
+                        txHash = await createSolanaTransaction(amount, currency);
+                    } else {
+                        // Fallback if Web3 isn't loaded
+                        txHash = 'dev_tx_' + Math.random().toString(36).substring(2, 15);
+                    }
                     btn.textContent = 'Recording Transaction...';
                 } else {
                     // Real transaction on mainnet
+                    if (typeof solanaWeb3 === 'undefined') {
+                        throw new Error('Web3 library not loaded. Please refresh and try again.');
+                    }
                     btn.textContent = 'Please approve transaction...';
                     txHash = await createSolanaTransaction(amount, currency);
                     btn.textContent = 'Recording Contribution...';
                 }
                 
-                // Record contribution
                 await recordContribution(walletAddress, amount, currency, txHash, 'crypto');
                 
                 showSuccess(`🎉 Contribution successful! ${isDevMode ? 'Demo ' : ''}TX: ${txHash.slice(0, 20)}...`);
                 document.getElementById('cryptoAmount').value = '';
                 
-                // Refresh data and balance
                 await refreshData();
-                await fetchWalletBalance();
                 
             } catch (error) {
-                console.error('Contribution error:', error);
                 showError('Transaction failed: ' + error.message);
             } finally {
                 const btn = document.getElementById('cryptoContributeBtn');
                 btn.disabled = false;
                 btn.textContent = 'Contribute with Crypto';
-            }
-        }
-        
-        // Improved transaction creation with better error handling
-        async function createSolanaTransaction(amount, currency) {
-            try {
-                if (!currentProvider || !walletAddress) {
-                    throw new Error('No wallet connected');
-                }
-                
-                console.log(`Creating ${currency} transaction for ${amount}`);
-                
-                // const connection = new solanaWeb3.Connection(
-                //     solanaWeb3.clusterApiUrl(CONFIG.SOLANA_NETWORK),
-                //     'confirmed'
-                // );
-
-                const connection = new solanaWeb3.Connection(
-                    CONFIG.SOLANA_RPC_URL, // Your Flask endpoint
-                    'confirmed'
-                );
-                
-                const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
-                const toPubkey = new solanaWeb3.PublicKey(CONFIG.TREASURY_WALLET);
-                
-                let transaction;
-                
-                if (currency === 'SOL') {
-                    // Create SOL transfer transaction
-                    transaction = new solanaWeb3.Transaction().add(
-                        solanaWeb3.SystemProgram.transfer({
-                            fromPubkey: fromPubkey,
-                            toPubkey: toPubkey,
-                            lamports: Math.floor(amount * solanaWeb3.LAMPORTS_PER_SOL),
-                        }),
-                    );
-                } else if (currency === 'USDC') {
-                    // Create USDC transfer transaction (SPL Token)
-                    if (typeof splToken === 'undefined') {
-                        throw new Error('SPL Token library not available for USDC transfers');
-                    }
-                    
-                    const mintPublicKey = new solanaWeb3.PublicKey(CONFIG.USDC_MINT);
-                    
-                    // Get associated token accounts
-                    const fromTokenAccount = await splToken.getAssociatedTokenAddress(
-                        mintPublicKey,
-                        fromPubkey
-                    );
-                    
-                    const toTokenAccount = await splToken.getAssociatedTokenAddress(
-                        mintPublicKey,
-                        toPubkey
-                    );
-                    
-                    transaction = new solanaWeb3.Transaction();
-                    
-                    // Check if destination token account exists
-                    try {
-                        const toTokenAccountInfo = await connection.getAccountInfo(toTokenAccount);
-                        if (!toTokenAccountInfo) {
-                            // Create associated token account for destination
-                            transaction.add(
-                                splToken.createAssociatedTokenAccountInstruction(
-                                    fromPubkey,
-                                    toTokenAccount,
-                                    toPubkey,
-                                    mintPublicKey
-                                )
-                            );
-                        }
-                    } catch (error) {
-                        console.warn('Could not check destination token account:', error);
-                    }
-                    
-                    // Add transfer instruction
-                    transaction.add(
-                        splToken.createTransferInstruction(
-                            fromTokenAccount,
-                            toTokenAccount,
-                            fromPubkey,
-                            Math.floor(amount * Math.pow(10, 6)), // USDC has 6 decimals
-                        )
-                    );
-                }
-                
-                // Get recent blockhash with retry logic
-                let blockhash;
-                let attempts = 0;
-                const maxAttempts = 3;
-                
-                while (attempts < maxAttempts) {
-                    try {
-                        const blockhashResponse = await connection.getLatestBlockhash('confirmed');
-                        blockhash = blockhashResponse.blockhash;
-                        break;
-                    } catch (error) {
-                        attempts++;
-                        if (attempts === maxAttempts) {
-                            throw new Error('Failed to get recent blockhash after multiple attempts');
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-                
-                transaction.recentBlockhash = blockhash;
-                transaction.feePayer = fromPubkey;
-                
-                console.log('Transaction created, requesting signature...');
-                
-                // Sign transaction with wallet-specific handling
-                let signedTransaction;
-                
-                if (currentWalletName === 'Slope') {
-                    // Slope wallet has different signing method
-                    const signedTxData = await currentProvider.signTransaction(transaction.serialize({
-                        requireAllSignatures: false
-                    }));
-                    signedTransaction = solanaWeb3.Transaction.from(signedTxData.data.transaction);
-                } else {
-                    // Standard signing for other wallets
-                    signedTransaction = await currentProvider.signTransaction(transaction);
-                }
-                
-                console.log('Transaction signed, sending to network...');
-                
-                // Send transaction with retry logic
-                let txid;
-                attempts = 0;
-                
-                while (attempts < maxAttempts) {
-                    try {
-                        txid = await connection.sendRawTransaction(
-                            signedTransaction.serialize(),
-                            {
-                                skipPreflight: false,
-                                preflightCommitment: 'confirmed'
-                            }
-                        );
-                        break;
-                    } catch (error) {
-                        attempts++;
-                        console.error(`Send attempt ${attempts} failed:`, error);
-                        
-                        if (attempts === maxAttempts) {
-                            throw new Error(`Failed to send transaction after ${maxAttempts} attempts: ${error.message}`);
-                        }
-                        
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                    }
-                }
-                
-                console.log('Transaction sent, waiting for confirmation...', txid);
-                
-                // Wait for confirmation with timeout
-                const confirmationPromise = connection.confirmTransaction(txid, 'confirmed');
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Transaction confirmation timeout')), 60000)
-                );
-                
-                await Promise.race([confirmationPromise, timeoutPromise]);
-                
-                console.log('Transaction confirmed:', txid);
-                return txid;
-                
-            } catch (error) {
-                console.error('Transaction creation error:', error);
-                
-                if (error.message.includes('User rejected')) {
-                    throw new Error('Transaction cancelled by user');
-                } else if (error.message.includes('Insufficient funds')) {
-                    throw new Error('Insufficient funds in wallet');
-                } else if (error.message.includes('timeout')) {
-                    throw new Error('Transaction timeout - it may still be processing');
-                } else {
-                    throw error;
-                }
             }
         }
         
@@ -1214,6 +927,102 @@
                     console.log('Payment modal closed');
                 }
             });
+        }
+        
+        // Real Solana transaction with library checks
+        async function createSolanaTransaction(amount, currency) {
+            try {
+                if (typeof solanaWeb3 === 'undefined') {
+                    throw new Error('Solana Web3 library not available');
+                }
+                
+                const connection = new solanaWeb3.Connection(
+                    solanaWeb3.clusterApiUrl(CONFIG.SOLANA_NETWORK)
+                );
+                
+                const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
+                const toPubkey = new solanaWeb3.PublicKey(CONFIG.TREASURY_WALLET);
+                
+                let transaction;
+                
+                if (currency === 'SOL') {
+                    // Create SOL transfer transaction
+                    transaction = new solanaWeb3.Transaction().add(
+                        solanaWeb3.SystemProgram.transfer({
+                            fromPubkey: fromPubkey,
+                            toPubkey: toPubkey,
+                            lamports: amount * solanaWeb3.LAMPORTS_PER_SOL,
+                        }),
+                    );
+                } else if (currency === 'USDC') {
+                    // Create USDC transfer transaction (SPL Token)
+                    if (!window.splTokenAvailable) {
+                        throw new Error('SPL Token library not available for USDC transfers');
+                    }
+                    
+                    const splToken = window.splToken;
+                    if (!splToken) {
+                        throw new Error('SPL Token library not loaded');
+                    }
+                    
+                    const mintPublicKey = new solanaWeb3.PublicKey(CONFIG.USDC_MINT);
+                    
+                    // Get associated token accounts
+                    const fromTokenAccount = await splToken.getAssociatedTokenAddress(
+                        mintPublicKey,
+                        fromPubkey
+                    );
+                    
+                    const toTokenAccount = await splToken.getAssociatedTokenAddress(
+                        mintPublicKey,
+                        toPubkey
+                    );
+                    
+                    transaction = new solanaWeb3.Transaction();
+                    
+                    // Check if destination token account exists
+                    const toTokenAccountInfo = await connection.getAccountInfo(toTokenAccount);
+                    if (!toTokenAccountInfo) {
+                        // Create associated token account for destination
+                        transaction.add(
+                            splToken.createAssociatedTokenAccountInstruction(
+                                fromPubkey,
+                                toTokenAccount,
+                                toPubkey,
+                                mintPublicKey
+                            )
+                        );
+                    }
+                    
+                    // Add transfer instruction
+                    transaction.add(
+                        splToken.createTransferInstruction(
+                            fromTokenAccount,
+                            toTokenAccount,
+                            fromPubkey,
+                            amount * Math.pow(10, 6), // USDC has 6 decimals
+                        )
+                    );
+                }
+                
+                // Get recent blockhash
+                const { blockhash } = await connection.getRecentBlockhash();
+                transaction.recentBlockhash = blockhash;
+                transaction.feePayer = fromPubkey;
+                
+                // Sign and send transaction
+                const signedTransaction = await provider.signTransaction(transaction);
+                const txid = await connection.sendRawTransaction(signedTransaction.serialize());
+                
+                // Wait for confirmation
+                await connection.confirmTransaction(txid);
+                
+                return txid;
+                
+            } catch (error) {
+                console.error('Transaction error:', error);
+                throw error;
+            }
         }
         
         // API functions with error handling and retry logic
@@ -1345,14 +1154,14 @@
                     tbody.innerHTML = contributions.map((contribution, index) => {
                         const displayWallet = contribution.wallet.includes('@') 
                             ? contribution.wallet.replace(/(.{3}).*@/, '$1***@')
-                            : contribution.wallet.slice(0, 8) + '...' + contribution.wallet.slice(-8);
+                            : contribution.wallet;
                         
                         return `
                             <tr>
                                 <td style="font-weight: 600;">#${index + 1}</td>
                                 <td>${displayWallet}</td>
                                 <td>${contribution.amount.toLocaleString()} ${contribution.currency}</td>
-                                <td><span style="background: ${contribution.method === 'card' ? '#4ade80' : '#ffd700'}; color: #000; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize;">${contribution.method}</span></td>
+                                <td><span style="background: ${contribution.method === 'card' ? '#4ade80' : '#ffd700'}; color: ${contribution.method === 'card' ? '#000' : '#000'}; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize;">${contribution.method}</span></td>
                                 <td>${new Date(contribution.timestamp).toLocaleDateString()}</td>
                             </tr>
                         `;
@@ -1367,21 +1176,31 @@
                         { wallet: 'C9Z2o4M1...r5S7t9P3', amount: 25.5, currency: 'SOL', method: 'crypto', timestamp: new Date().toISOString() },
                     ];
                     
-                    tbody.innerHTML = mockData.map((contribution, index) => {
-                        const displayWallet = contribution.wallet.includes('@') 
-                            ? contribution.wallet.replace(/(.{3}).*@/, '$1***@')
-                            : contribution.wallet;
-                        
-                        return `
+                    if (mockData.length === 0) {
+                        tbody.innerHTML = `
                             <tr>
-                                <td style="font-weight: 600;">#${index + 1}</td>
-                                <td>${displayWallet}</td>
-                                <td>${contribution.amount.toLocaleString()} ${contribution.currency}</td>
-                                <td><span style="background: ${contribution.method === 'card' ? '#4ade80' : '#ffd700'}; color: #000; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize;">${contribution.method}</span></td>
-                                <td>${new Date(contribution.timestamp).toLocaleDateString()}</td>
+                                <td colspan="5" style="text-align: center; color: #888; padding: 40px;">
+                                    No contributions yet. Be the first!
+                                </td>
                             </tr>
                         `;
-                    }).join('');
+                    } else {
+                        tbody.innerHTML = mockData.map((contribution, index) => {
+                            const displayWallet = contribution.wallet.includes('@') 
+                                ? contribution.wallet.replace(/(.{3}).*@/, '$1***@')
+                                : contribution.wallet;
+                            
+                            return `
+                                <tr>
+                                    <td style="font-weight: 600;">#${index + 1}</td>
+                                    <td>${displayWallet}</td>
+                                    <td>${contribution.amount.toLocaleString()} ${contribution.currency}</td>
+                                    <td><span style="background: ${contribution.method === 'card' ? '#4ade80' : '#ffd700'}; color: ${contribution.method === 'card' ? '#000' : '#000'}; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize;">${contribution.method}</span></td>
+                                    <td>${new Date(contribution.timestamp).toLocaleDateString()}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
                 }
                 
             } catch (error) {
@@ -1407,7 +1226,7 @@
             
             setTimeout(() => {
                 successElement.style.display = 'none';
-            }, 8000);
+            }, 5000);
         }
         
         function showError(message) {
@@ -1415,91 +1234,20 @@
             errorElement.textContent = message;
             errorElement.style.display = 'block';
             document.getElementById('successMessage').style.display = 'none';
-            
-            setTimeout(() => {
-                errorElement.style.display = 'none';
-            }, 10000);
-        }
-        
-        function showStatus(message) {
-            // Show status in console and could be enhanced to show in UI
-            console.log('Status:', message);
         }
         
         // Event listeners
+        document.getElementById('connectWallet').addEventListener('click', connectWallet);
         document.getElementById('cryptoContributeBtn').addEventListener('click', contributeCrypto);
         document.getElementById('cardContributeBtn').addEventListener('click', payWithCard);
-        document.getElementById('disconnectWallet').addEventListener('click', disconnectWallet);
         
-        // Auto-refresh data every 30 seconds
-        setInterval(refreshData, 30000);
+        // Auto-refresh data
+        setInterval(refreshData, 15000);
         
-        // Initialize on page load with improved timing
+        // Initial load - wait for libraries then load data
         window.addEventListener('DOMContentLoaded', async () => {
-            console.log('Page loaded, initializing...');
-            
-            // Load initial data immediately
+            await waitForLibraries();
             await refreshData();
-            
-            // Initialize wallet detection with a delay to allow wallet extensions to load
-            setTimeout(() => {
-                console.log('Initializing wallet detection...');
-                initializeWalletDetection();
-            }, 2000);
-            
-            // Update SOL price
-            try {
-                const response = await fetch("https://chesssol.com/api/chesssol/backend/solana-price");
-                const data = await response.json();
-                if (data && data.price) {
-                    CONFIG.SOL_TO_USD_RATE = parseFloat(data.price);
-                    console.log("Live SOL price updated:", CONFIG.SOL_TO_USD_RATE);
-                }
-            } catch (err) {
-                console.warn("Using fallback SOL price:", CONFIG.SOL_TO_USD_RATE);
-            }
-        });
-        
-        // Handle wallet events (disconnect, account change) with improved event handling
-        window.addEventListener('load', () => {
-            // Listen for wallet events after page loads
-            setTimeout(() => {
-                Object.entries(WALLET_ADAPTERS).forEach(([key, adapter]) => {
-                    try {
-                        const provider = adapter.detect();
-                        if (provider && typeof provider.on === 'function') {
-                            // Handle disconnect events
-                            provider.on('disconnect', () => {
-                                if (currentProvider === provider) {
-                                    console.log(`${adapter.name} disconnected`);
-                                    disconnectWallet();
-                                }
-                            });
-                            
-                            // Handle account change events
-                            provider.on('accountChanged', (newAccount) => {
-                                if (currentProvider === provider && newAccount) {
-                                    console.log(`${adapter.name} account changed to:`, newAccount);
-                                    walletAddress = newAccount.toString();
-                                    updateWalletUI();
-                                    fetchWalletBalance();
-                                }
-                            });
-                            
-                            // Handle network change events if supported
-                            if (typeof provider.on === 'function') {
-                                provider.on('chainChanged', (chainId) => {
-                                    console.log(`${adapter.name} network changed:`, chainId);
-                                    // Could add network validation here
-                                });
-                            }
-                        }
-                    } catch (error) {
-                        // Silently ignore errors for unavailable wallets
-                        console.debug(`Could not set up events for ${adapter.name}:`, error.message);
-                    }
-                });
-            }, 3000);
         });
     </script>
 </body>
