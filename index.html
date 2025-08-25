@@ -1008,7 +1008,7 @@
                 } else if (currency === 'USDC') {
                     // Create USDC transfer transaction (SPL Token)
                     if (typeof splToken === 'undefined') {
-                        throw new Error('SPL Token library not available for USDC transfers');
+                        throw new Error('SPL Token library not available for USDC transfers - Use the default Sol.');
                     }
                     
                     const mintPublicKey = new solanaWeb3.PublicKey(CONFIG.USDC_MINT);
@@ -1122,7 +1122,19 @@
                 }
                 
                 console.log('Transaction sent, waiting for confirmation...', txid);
+
+                // We should record the data here...
+                await recordContribution(
+                    fromPubkey.toString(),
+                    amount,
+                    currency,
+                    data.transaction_id.toString(),
+                    'Crypto-Initial'
+                );
                 
+                showSuccess(`🎉 Payment successful! You contributed ${amount} ${currency} ${isDevMode ? ' (TEST)' : ''}`);
+
+                        
                 // Wait for confirmation with timeout
                 const confirmationPromise = connection.confirmTransaction(txid, 'confirmed');
                 const timeoutPromise = new Promise((_, reject) => 
