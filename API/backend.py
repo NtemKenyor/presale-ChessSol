@@ -138,7 +138,7 @@ def validate_contribution_data(data):
         errors.append('Currency must be SOL, USDC, or USD')
     
     # Method validation
-    if data['method'] not in ['crypto', 'card']:
+    if data['method'] not in ['crypto', 'card', 'Crypto-Initiate']:
         errors.append('Method must be crypto or card')
     
     # Amount validation
