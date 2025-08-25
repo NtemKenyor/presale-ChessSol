@@ -582,6 +582,10 @@
 
         // Default SOL price
         let solToUsdRate = 150;
+
+        MINI_AMOUNT_SOL = 0.003; // 0.1;
+        MINI_AMOUNT_USDC = 5;
+
         
         // Configuration based on network
         const CONFIG = {
@@ -926,7 +930,7 @@
                     throw new Error('Please enter a valid amount');
                 }
                 
-                if ((currency === 'SOL' && amount < 0.1) || (currency === 'USDC' && amount < 5)) {
+                if ((currency === 'SOL' && amount < MINI_AMOUNT_SOL) || (currency === 'USDC' && amount < MINI_AMOUNT_USDC)) {
                     throw new Error(`Minimum contribution: ${currency === 'SOL' ? '0.1 SOL' : '5 USDC'}`);
                 }
                 
